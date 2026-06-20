@@ -12,94 +12,94 @@ provider:
   region: us-east-1
   iam:
     role: arn:aws:iam::413507650058:role/LabRole
-  iamRoleStatements:
-    - Effect: Allow
-      Action:
-        - dynamodb:PutItem
-        - dynamodb:GetItem
-        - dynamodb:Query
-        - dynamodb:UpdateItem
-      Resource:
-        - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/pedido_pasos-${sls:stage}
-    - Effect: Allow
-      Action:
-        - states:StartExecution
-        - states:SendTaskSuccess
-        - states:SendTaskFailure
-        - states:DescribeExecution
-      Resource:
-        - !Sub arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:OrderWorkflow-${sls:stage}
-        - !Sub arn:aws:states:${AWS::Region}:${AWS::AccountId}:execution:OrderWorkflow-${sls:stage}:*
+  environment:
+    TABLA_PASOS: pedido_pasos-${sls:stage}
 
 functions:
+  # ── Invocada externamente (EventBridge o Lambda) ────────────────────────
   iniciarWorkflow:
     handler: handlers/iniciar_workflow.handler
     environment:
-      STATE_MACHINE_ARN: !Sub arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:OrderWorkflow-${sls:stage}
-    # Esta función es invocada internamente (ej. por EventBridge o ms-pedidos),
-    # por lo que no tiene endpoint HTTP propio.
+      STATE_MACHINE_ARN: !Sub >-
+        arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:WorkflowPedido-${sls:stage}
 
+  # ── Invocada por API Gateway (operador/frontend) ─────────────────────────
   avanzarPaso:
     handler: handlers/avanzar_paso.handler
-    environment:
-      TABLA_PASOS: pedido_pasos-${sls:stage}
     events:
       - http:
           path: pasos/avanzar
           method: post
           cors: true
 
+  # ── Invocadas por Step Functions (waitForTaskToken) ──────────────────────
+  cocinarTask:
+    handler: handlers/cocinar_task.handler
+
+  despacharTask:
+    handler: handlers/despachar_task.handler
+
+  repartirTask:
+    handler: handlers/repartir_task.handler
+
+# ── Step Function ─────────────────────────────────────────────────────────
 stepFunctions:
   stateMachines:
-    orderWorkflow:
-      name: OrderWorkflow-${sls:stage}
+    workflowPedido:
+      name: WorkflowPedido-${sls:stage}
       role: arn:aws:iam::413507650058:role/LabRole
       definition:
-        Comment: "Flujo de trabajo de pedidos con patrón Wait for Callback"
-        StartAt: EsperarCocina
+        Comment: "Flujo de pedidos: Cocina → Despacho → Reparto (Wait for Callback)"
+        StartAt: Cocina
         States:
-          EsperarCocina:
+          Cocina:
             Type: Task
             Resource: arn:aws:states:::lambda:invoke.waitForTaskToken
             Parameters:
-              FunctionName: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${self:service}-${sls:stage}-avanzarPaso
+              FunctionName: !Sub >-
+                arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${self:service}-${sls:stage}-cocinarTask
               Payload:
-                paso: "cocina"
+                paso: "COCINA"
                 pedido.$: "$"
                 taskToken.$: "$$.Task.Token"
             ResultPath: "$.resultadoCocina"
-            Next: EsperarDespacho
+            TimeoutSeconds: 3600
+            Next: Despacho
             Catch:
               - ErrorEquals: ["States.ALL"]
                 ResultPath: "$.error"
                 Next: PedidoFallido
 
-          EsperarDespacho:
+          Despacho:
             Type: Task
             Resource: arn:aws:states:::lambda:invoke.waitForTaskToken
             Parameters:
-              FunctionName: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${self:service}-${sls:stage}-avanzarPaso
+              FunctionName: !Sub >-
+                arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${self:service}-${sls:stage}-despacharTask
               Payload:
-                paso: "despacho"
+                paso: "DESPACHO"
                 pedido.$: "$"
                 taskToken.$: "$$.Task.Token"
             ResultPath: "$.resultadoDespacho"
-            Next: EsperarReparto
+            TimeoutSeconds: 3600
+            Next: Reparto
             Catch:
               - ErrorEquals: ["States.ALL"]
                 ResultPath: "$.error"
                 Next: PedidoFallido
 
-          EsperarReparto:
+          Reparto:
             Type: Task
             Resource: arn:aws:states:::lambda:invoke.waitForTaskToken
             Parameters:
-              FunctionName: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${self:service}-${sls:stage}-avanzarPaso
+              FunctionName: !Sub >-
+                arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${self:service}-${sls:stage}-repartirTask
               Payload:
-                paso: "reparto"
+                paso: "REPARTO"
                 pedido.$: "$"
                 taskToken.$: "$$.Task.Token"
             ResultPath: "$.resultadoReparto"
+            TimeoutSeconds: 7200
             Next: PedidoEntregado
             Catch:
               - ErrorEquals: ["States.ALL"]
@@ -112,8 +112,9 @@ stepFunctions:
           PedidoFallido:
             Type: Fail
             Error: "PedidoError"
-            Cause: "El flujo de trabajo del pedido falló en uno de los pasos."
+            Cause: "El flujo de trabajo falló en uno de los pasos."
 
+# ── Recursos CloudFormation ───────────────────────────────────────────────
 resources:
   Resources:
     TablaPedidoPasos:

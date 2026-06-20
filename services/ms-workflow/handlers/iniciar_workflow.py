@@ -1,3 +1,11 @@
+"""
+iniciar_workflow.py — Inicia la ejecución de la Step Function WorkflowPedido.
+
+Puede ser invocado:
+  - Por EventBridge (event['detail'] contiene el pedido).
+  - Por invocación Lambda directa (event contiene el pedido).
+  - Por API Gateway (event['body'] contiene el pedido en JSON).
+"""
 import json
 import os
 import uuid
@@ -14,20 +22,16 @@ CORS_HEADERS = {
 
 
 def handler(event, context):
-    """
-    Inicia la ejecución de la Step Function OrderWorkflow.
-
-    Puede ser invocado:
-    - Directamente por otra Lambda (ms-pedidos) con event como dict.
-    - Por un evento de EventBridge con el pedido en event['detail'].
-    """
     try:
-        # Soporte para invocación directa o via EventBridge
+        # ── Normalizar el origen del evento ───────────────────────────────
         if "detail" in event:
+            # Viene de EventBridge
             pedido = event["detail"]
-        elif "body" in event:
-            pedido = json.loads(event.get("body") or "{}")
+        elif "body" in event and event["body"]:
+            # Viene de API Gateway
+            pedido = json.loads(event["body"])
         else:
+            # Invocación Lambda directa
             pedido = event
 
         tenant_id = pedido.get("tenant_id")
@@ -42,7 +46,7 @@ def handler(event, context):
                 ),
             }
 
-        # Nombre único de ejecución: tenant + pedido para trazabilidad
+        # Nombre único y trazable para la ejecución
         execution_name = f"{tenant_id}-{pedido_id}-{uuid.uuid4().hex[:8]}"
 
         respuesta = sfn_client.start_execution(
