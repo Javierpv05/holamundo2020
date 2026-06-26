@@ -1,6 +1,6 @@
 # Sistema de Gestión de Pedidos — Proyecto Final Cloud Computing
 
-Plataforma multi-tenant de pedidos de comida (estilo Taco Bell) con arquitectura serverless basada en eventos, desplegada en AWS (principal) y OCI (componente multi-nube).
+Plataforma multi-tenant de pedidos de comida (Madam Tusan) con arquitectura serverless basada en eventos, desplegada en AWS (principal) y OCI (componente multi-nube).
 
 ## Arquitectura
 
@@ -20,7 +20,8 @@ Cliente → API Gateway (HTTP API) → Lambda (Python 3.12)
 |----------------|------------------------------------------|------------|
 | ms-catalogo    | CRUD de productos por tenant             | Listo      |
 | ms-pedidos     | Creación y consulta de pedidos           | Listo      |
-| ms-workflow    | Orquestación del flujo de estados        | TODO       |
+| ms-workflow    | Orquestación del flujo de estados        | Listo      |
+| ms-auth        | Autenticación con Cognito y usuarios     | Listo      |
 
 ## Despliegue
 

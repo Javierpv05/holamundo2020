@@ -1,0 +1,161 @@
+org: javierpariansullca
+service: ms-auth
+
+frameworkVersion: "4"
+
+provider:
+  name: aws
+  runtime: python3.12
+  region: us-east-1
+  iam:
+    role: arn:aws:iam::413507650058:role/LabRole
+  environment:
+    USER_POOL_ID: !Ref CognitoUserPool
+    APP_CLIENT_ID: !Ref CognitoUserPoolClient
+    TABLA_USUARIOS: usuarios-${sls:stage}
+
+functions:
+  # ── Registro (público — sin authorizer) ───────────────────────────────────
+  registro:
+    handler: handlers/registro.handler
+    events:
+      - http:
+          path: auth/registro
+          method: post
+          cors: true
+
+  # ── Login (público — sin authorizer) ──────────────────────────────────────
+  login:
+    handler: handlers/login.handler
+    events:
+      - http:
+          path: auth/login
+          method: post
+          cors: true
+
+  # ── Obtener perfil (requiere JWT válido) ──────────────────────────────────
+  obtenerUsuario:
+    handler: handlers/obtener_usuario.handler
+    events:
+      - http:
+          path: auth/usuario
+          method: get
+          cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref ApiGatewayAuthorizer
+
+  # ── Actualizar perfil (requiere JWT válido) ───────────────────────────────
+  actualizarUsuario:
+    handler: handlers/actualizar_usuario.handler
+    events:
+      - http:
+          path: auth/usuario
+          method: put
+          cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref ApiGatewayAuthorizer
+
+# ── Recursos CloudFormation ───────────────────────────────────────────────
+resources:
+  Resources:
+    # ── Cognito User Pool ──────────────────────────────────────────────────
+    CognitoUserPool:
+      Type: AWS::Cognito::UserPool
+      Properties:
+        UserPoolName: madamtusan-pool-${sls:stage}
+        UsernameAttributes:
+          - email
+        AutoVerifiedAttributes:
+          - email
+        Schema:
+          - Name: email
+            AttributeDataType: String
+            Required: true
+            Mutable: true
+          - Name: name
+            AttributeDataType: String
+            Required: false
+            Mutable: true
+          - Name: tenant_id
+            AttributeDataType: String
+            Required: false
+            Mutable: true
+        Policies:
+          PasswordPolicy:
+            MinimumLength: 8
+            RequireUppercase: false
+            RequireLowercase: true
+            RequireNumbers: true
+            RequireSymbols: false
+        AdminCreateUserConfig:
+          AllowAdminCreateUserOnly: false
+
+    # ── App Client (sin secreto para frontend web) ─────────────────────────
+    CognitoUserPoolClient:
+      Type: AWS::Cognito::UserPoolClient
+      Properties:
+        ClientName: madamtusan-web-client-${sls:stage}
+        UserPoolId: !Ref CognitoUserPool
+        GenerateSecret: false
+        ExplicitAuthFlows:
+          - ALLOW_USER_PASSWORD_AUTH
+          - ALLOW_USER_SRP_AUTH
+          - ALLOW_REFRESH_TOKEN_AUTH
+        PreventUserExistenceErrors: ENABLED
+        AccessTokenValidity: 1
+        IdTokenValidity: 1
+        RefreshTokenValidity: 30
+        TokenValidityUnits:
+          AccessToken: hours
+          IdToken: hours
+          RefreshToken: days
+
+    # ── Tabla DynamoDB de usuarios ─────────────────────────────────────────
+    TablaUsuarios:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: usuarios-${sls:stage}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: tenant_id
+            AttributeType: S
+          - AttributeName: user_id
+            AttributeType: S
+        KeySchema:
+          - AttributeName: tenant_id
+            KeyType: HASH
+          - AttributeName: user_id
+            KeyType: RANGE
+
+    # ── Authorizer de Cognito para este API Gateway ────────────────────────
+    ApiGatewayAuthorizer:
+      Type: AWS::ApiGateway::Authorizer
+      Properties:
+        Name: CognitoAuthorizer-${sls:stage}
+        Type: COGNITO_USER_POOLS
+        IdentitySource: method.request.header.Authorization
+        RestApiId: !Ref ApiGatewayRestApi
+        ProviderARNs:
+          - !GetAtt CognitoUserPool.Arn
+
+  # ── Outputs exportados para cross-stack reference ──────────────────────────
+  Outputs:
+    UserPoolArn:
+      Description: ARN del User Pool de Cognito
+      Value: !GetAtt CognitoUserPool.Arn
+      Export:
+        Name: ms-auth-${sls:stage}-UserPoolArn
+
+    UserPoolId:
+      Description: ID del User Pool de Cognito
+      Value: !Ref CognitoUserPool
+      Export:
+        Name: ms-auth-${sls:stage}-UserPoolId
+
+    AppClientId:
+      Description: ID del App Client (para el frontend)
+      Value: !Ref CognitoUserPoolClient
+      Export:
+        Name: ms-auth-${sls:stage}-AppClientId

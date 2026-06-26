@@ -9,7 +9,7 @@ API_CATALOGO="https://u3vs997az9.execute-api.us-east-1.amazonaws.com/dev"
 API_PEDIDOS="https://g4bx3071ec.execute-api.us-east-1.amazonaws.com/dev"
 API_WORKFLOW="https://ej0bjjyyie.execute-api.us-east-1.amazonaws.com/dev"
 
-TENANT="taco-bell"
+TENANT="madam-tusan"
 
 echo "======================================================"
 echo "1. Creando un Producto en ms-catalogo..."

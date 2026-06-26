@@ -13,7 +13,7 @@ def handler(event, context):
         query_params = event.get("queryStringParameters") or {}
 
         producto_id = path_params.get("producto_id")
-        tenant_id = (query_params or {}).get("tenant_id") or "taco-bell"
+        tenant_id = (query_params or {}).get("tenant_id") or "madam-tusan"
 
         if not producto_id:
             log_event("WARN", "Falta producto_id en la ruta")

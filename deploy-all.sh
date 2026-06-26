@@ -2,9 +2,18 @@
 set -e
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-STAGE="${1:-dev}"
+STAGE="dev"
 
-SERVICES=(ms-catalogo ms-pedidos ms-workflow)
+# Parse --stage argument
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        --stage) STAGE="$2"; shift ;;
+        *) echo "Unknown parameter passed: $1"; exit 1 ;;
+    esac
+    shift
+done
+
+SERVICES=(ms-auth ms-catalogo ms-pedidos ms-workflow)
 
 echo "============================================"
 echo "  Desplegando todos los servicios (stage: $STAGE)"

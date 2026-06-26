@@ -71,15 +71,58 @@
 | `Detail`      | `{ tenant_id, pedido_id }`     |
 | `EventBusName`| `pedidos-bus-{stage}`          |
 
-**Uso futuro:** ms-workflow suscribirá una regla EventBridge sobre este bus para iniciar la máquina de estados de Step Functions automáticamente al recibir el evento `PedidoCreado`.
+**Uso actual:** ms-workflow tiene suscrita una regla EventBridge sobre este bus para iniciar la máquina de estados de Step Functions automáticamente al recibir el evento `PedidoCreado`.
+
+---
+
+## Flujo Step Functions (ms-workflow)
+
+El siguiente diagrama muestra la máquina de estados que orquesta los pedidos, utilizando el patrón **Wait for Callback**:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Cocina : PedidoCreado (EventBridge)
+    
+    state Cocina {
+        [*] --> cocinar_task (Lambda)
+        cocinar_task (Lambda) --> Espera_Cocina : Guarda taskToken en DynamoDB
+        Espera_Cocina --> [*] : Operador hace POST /pasos/avanzar
+    }
+    
+    Cocina --> Despacho : sfn.send_task_success()
+    
+    state Despacho {
+        [*] --> despachar_task (Lambda)
+        despachar_task (Lambda) --> Espera_Despacho : Guarda taskToken
+        Espera_Despacho --> [*] : Operador hace POST /pasos/avanzar
+    }
+    
+    Despacho --> Reparto : sfn.send_task_success()
+    
+    state Reparto {
+        [*] --> repartir_task (Lambda)
+        repartir_task (Lambda) --> Espera_Reparto : Guarda taskToken
+        Espera_Reparto --> [*] : Operador hace POST /pasos/avanzar
+    }
+    
+    Reparto --> Entregado : sfn.send_task_success()
+    
+    state Entregado {
+        [*] --> entregar_task (Lambda)
+        entregar_task (Lambda) --> [*] : Actualiza pedidos a ENTREGADO
+    }
+    
+    Entregado --> PedidoEntregado
+    PedidoEntregado --> [*]
+```
 
 ---
 
 ## TODOs pendientes
 
-- [ ] Integración Step Functions en ms-workflow (`send_task_success`)
-- [ ] Regla EventBridge `PedidoCreado` → Step Functions en ms-workflow
+- [x] Integración Step Functions en ms-workflow (`send_task_success`)
+- [x] Regla EventBridge `PedidoCreado` → Step Functions en ms-workflow
 - [ ] GSI `PorPedido` en tabla `pedido_pasos` para historial por pedido
-- [ ] Cognito User Pools para autenticación multi-tenant
+- [x] Cognito User Pools para autenticación multi-tenant
 - [ ] OCI: Functions + Oracle DB como nube secundaria
 - [ ] Frontend web-cliente y web-trabajadores

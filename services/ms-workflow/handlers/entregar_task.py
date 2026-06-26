@@ -1,35 +1,21 @@
 """
-repartir_task.py — Invocada por Step Functions (waitForTaskToken).
+entregar_task.py — Invocada por Step Functions al finalizar el flujo. No espera token.
 """
 import os
 from datetime import datetime, timezone
 import boto3
 
 dynamodb = boto3.resource("dynamodb")
-tabla_pasos = dynamodb.Table(os.environ["TABLA_PASOS"])
 tabla_pedidos = dynamodb.Table(os.environ["TABLA_PEDIDOS"])
 
-PASO = "REPARTO"
-ESTADO_PEDIDO = "EN_REPARTO"
+PASO = "ENTREGADO"
+ESTADO_PEDIDO = "ENTREGADO"
 
 def handler(event, context):
     try:
         pedido = event.get("pedido", event)
-        task_token = event.get("taskToken")
-
         tenant_id = pedido.get("tenant_id", "madam-tusan")
         pedido_id = pedido.get("pedido_id", "desconocido")
-
-        paso_item = {
-            "tenant_id": tenant_id,
-            "paso_id": f"{pedido_id}#{PASO}",
-            "pedido_id": pedido_id,
-            "paso": PASO,
-            "estado": "PENDIENTE",
-            "task_token": task_token,
-            "fecha_inicio": datetime.now(timezone.utc).isoformat(),
-        }
-        tabla_pasos.put_item(Item=paso_item)
 
         tabla_pedidos.update_item(
             Key={"tenant_id": tenant_id, "pedido_id": pedido_id},
@@ -43,7 +29,7 @@ def handler(event, context):
 
         return {
             "statusCode": 200,
-            "mensaje": f"Paso {PASO} registrado.",
+            "mensaje": f"Pedido {pedido_id} marcado como {ESTADO_PEDIDO}.",
             "tenant_id": tenant_id,
             "pedido_id": pedido_id,
             "paso": PASO,

@@ -1,50 +1,49 @@
 """
 despachar_task.py — Invocada por Step Functions (waitForTaskToken).
-
-Idéntica en estructura a cocinar_task.py, pero para el paso DESPACHO.
-Guarda el token en DynamoDB y pausa el flujo hasta que el operador confirme.
 """
-import json
 import os
-import uuid
 from datetime import datetime, timezone
-
 import boto3
 
 dynamodb = boto3.resource("dynamodb")
-tabla = dynamodb.Table(os.environ["TABLA_PASOS"])
+tabla_pasos = dynamodb.Table(os.environ["TABLA_PASOS"])
+tabla_pedidos = dynamodb.Table(os.environ["TABLA_PEDIDOS"])
 
 PASO = "DESPACHO"
-
-CORS_HEADERS = {
-    "Content-Type": "application/json",
-    "Access-Control-Allow-Origin": "*",
-}
-
+ESTADO_PEDIDO = "EN_DESPACHO"
 
 def handler(event, context):
     try:
         pedido = event.get("pedido", event)
         task_token = event.get("taskToken")
 
-        tenant_id = pedido.get("tenant_id", "taco-bell")
+        tenant_id = pedido.get("tenant_id", "madam-tusan")
         pedido_id = pedido.get("pedido_id", "desconocido")
 
         paso_item = {
             "tenant_id": tenant_id,
-            "paso_id": str(uuid.uuid4()),
+            "paso_id": f"{pedido_id}#{PASO}",
             "pedido_id": pedido_id,
             "paso": PASO,
             "estado": "PENDIENTE",
             "task_token": task_token,
             "fecha_inicio": datetime.now(timezone.utc).isoformat(),
         }
+        tabla_pasos.put_item(Item=paso_item)
 
-        tabla.put_item(Item=paso_item)
+        tabla_pedidos.update_item(
+            Key={"tenant_id": tenant_id, "pedido_id": pedido_id},
+            UpdateExpression="SET tenant_estado = :te, estado_actual = :e, actualizado_en = :t",
+            ExpressionAttributeValues={
+                ":te": f"{tenant_id}#{ESTADO_PEDIDO}",
+                ":e": ESTADO_PEDIDO,
+                ":t": datetime.now(timezone.utc).isoformat(),
+            }
+        )
 
         return {
             "statusCode": 200,
-            "mensaje": f"Paso {PASO} registrado. Esperando confirmación del operador.",
+            "mensaje": f"Paso {PASO} registrado.",
             "tenant_id": tenant_id,
             "pedido_id": pedido_id,
             "paso": PASO,

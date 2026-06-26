@@ -30,6 +30,9 @@ functions:
           path: productos
           method: get
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref ApiGatewayAuthorizer
 
   crearProducto:
     handler: handlers/crear_producto.handler
@@ -40,6 +43,9 @@ functions:
           path: productos
           method: post
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref ApiGatewayAuthorizer
 
   buscarProducto:
     handler: handlers/buscar_producto.handler
@@ -50,6 +56,9 @@ functions:
           path: productos/{producto_id}
           method: get
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref ApiGatewayAuthorizer
 
   modificarProducto:
     handler: handlers/modificar_producto.handler
@@ -60,6 +69,9 @@ functions:
           path: productos/{producto_id}
           method: put
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref ApiGatewayAuthorizer
 
   eliminarProducto:
     handler: handlers/eliminar_producto.handler
@@ -70,9 +82,25 @@ functions:
           path: productos/{producto_id}
           method: delete
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref ApiGatewayAuthorizer
 
 resources:
   Resources:
+    # ── Authorizer referenciando el User Pool de ms-auth ──────────────────
+    ApiGatewayAuthorizer:
+      Type: AWS::ApiGateway::Authorizer
+      Properties:
+        Name: CognitoAuthorizer-catalogo-${sls:stage}
+        Type: COGNITO_USER_POOLS
+        IdentitySource: method.request.header.Authorization
+        RestApiId: !Ref ApiGatewayRestApi
+        ProviderARNs:
+          # Cross-stack reference: ms-auth debe estar desplegado primero
+          - ${cf:ms-auth-${sls:stage}.UserPoolArn}
+
+    # ── Tabla DynamoDB ────────────────────────────────────────────────────
     TablaProductos:
       Type: AWS::DynamoDB::Table
       Properties:

@@ -12,8 +12,25 @@ provider:
   region: us-east-1
   iam:
     role: arn:aws:iam::413507650058:role/LabRole
+  iamRoleStatements:
+    - Effect: Allow
+      Action:
+        - dynamodb:PutItem
+        - dynamodb:GetItem
+        - dynamodb:UpdateItem
+        - dynamodb:Query
+      Resource:
+        - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/pedido_pasos-${sls:stage}
+        - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/pedidos-${sls:stage}
+    - Effect: Allow
+      Action:
+        - states:SendTaskSuccess
+        - states:SendTaskFailure
+      Resource: "*"
   environment:
     TABLA_PASOS: pedido_pasos-${sls:stage}
+    TABLA_PEDIDOS: pedidos-${sls:stage}
+
 
 functions:
   # ── Invocada externamente (EventBridge o Lambda) ────────────────────────
@@ -31,16 +48,32 @@ functions:
           path: pasos/avanzar
           method: post
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref ApiGatewayAuthorizer
+    environment:
+      TABLA_PEDIDOS: pedidos-${sls:stage}
 
   # ── Invocadas por Step Functions (waitForTaskToken) ──────────────────────
   cocinarTask:
     handler: handlers/cocinar_task.handler
+    environment:
+      TABLA_PEDIDOS: pedidos-${sls:stage}
 
   despacharTask:
     handler: handlers/despachar_task.handler
+    environment:
+      TABLA_PEDIDOS: pedidos-${sls:stage}
 
   repartirTask:
     handler: handlers/repartir_task.handler
+    environment:
+      TABLA_PEDIDOS: pedidos-${sls:stage}
+
+  entregarTask:
+    handler: handlers/entregar_task.handler
+    environment:
+      TABLA_PEDIDOS: pedidos-${sls:stage}
 
 # ── Step Function ─────────────────────────────────────────────────────────
 stepFunctions:
@@ -100,6 +133,22 @@ stepFunctions:
                 taskToken.$: "$$.Task.Token"
             ResultPath: "$.resultadoReparto"
             TimeoutSeconds: 7200
+            Next: Entregado
+            Catch:
+              - ErrorEquals: ["States.ALL"]
+                ResultPath: "$.error"
+                Next: PedidoFallido
+
+          Entregado:
+            Type: Task
+            Resource: arn:aws:states:::lambda:invoke
+            Parameters:
+              FunctionName: !Sub >-
+                arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${self:service}-${sls:stage}-entregarTask
+              Payload:
+                paso: "ENTREGADO"
+                pedido.$: "$"
+            ResultPath: "$.resultadoEntregado"
             Next: PedidoEntregado
             Catch:
               - ErrorEquals: ["States.ALL"]
@@ -117,6 +166,18 @@ stepFunctions:
 # ── Recursos CloudFormation ───────────────────────────────────────────────
 resources:
   Resources:
+    # ── Authorizer referenciando el User Pool de ms-auth ──────────────────
+    ApiGatewayAuthorizer:
+      Type: AWS::ApiGateway::Authorizer
+      Properties:
+        Name: CognitoAuthorizer-workflow-${sls:stage}
+        Type: COGNITO_USER_POOLS
+        IdentitySource: method.request.header.Authorization
+        RestApiId: !Ref ApiGatewayRestApi
+        ProviderARNs:
+          - ${cf:ms-auth-${sls:stage}.UserPoolArn}
+
+    # ── Tabla DynamoDB de pasos ───────────────────────────────────────────
     TablaPedidoPasos:
       Type: AWS::DynamoDB::Table
       Properties:
@@ -132,3 +193,20 @@ resources:
             KeyType: HASH
           - AttributeName: paso_id
             KeyType: RANGE
+
+    # ── Regla de EventBridge para iniciar Step Functions ───────────────────
+    EventBridgeToStepFunctionsRule:
+      Type: AWS::Events::Rule
+      Properties:
+        EventBusName: pedidos-bus-${sls:stage}
+        EventPattern:
+          source:
+            - pedidos.app
+          detail-type:
+            - PedidoCreado
+        State: ENABLED
+        Targets:
+          - Arn: !Sub arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:WorkflowPedido-${sls:stage}
+            Id: TargetStateMachine
+            RoleArn: arn:aws:iam::413507650058:role/LabRole
+            InputPath: "$.detail"

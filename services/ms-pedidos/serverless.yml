@@ -36,6 +36,9 @@ functions:
           path: pedidos
           method: post
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref ApiGatewayAuthorizer
 
   consultarEstado:
     handler: handlers/consultar_estado.handler
@@ -46,6 +49,9 @@ functions:
           path: pedidos/{pedido_id}
           method: get
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref ApiGatewayAuthorizer
 
   listarPedidos:
     handler: handlers/listar_pedidos.handler
@@ -56,6 +62,9 @@ functions:
           path: pedidos
           method: get
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref ApiGatewayAuthorizer
 
   listarPorEstado:
     handler: handlers/listar_por_estado.handler
@@ -66,9 +75,24 @@ functions:
           path: pedidos/estado/{estado}
           method: get
           cors: true
+          authorizer:
+            type: COGNITO_USER_POOLS
+            authorizerId: !Ref ApiGatewayAuthorizer
 
 resources:
   Resources:
+    # ── Authorizer referenciando el User Pool de ms-auth ──────────────────
+    ApiGatewayAuthorizer:
+      Type: AWS::ApiGateway::Authorizer
+      Properties:
+        Name: CognitoAuthorizer-pedidos-${sls:stage}
+        Type: COGNITO_USER_POOLS
+        IdentitySource: method.request.header.Authorization
+        RestApiId: !Ref ApiGatewayRestApi
+        ProviderARNs:
+          - ${cf:ms-auth-${sls:stage}.UserPoolArn}
+
+    # ── Tabla DynamoDB ────────────────────────────────────────────────────
     TablaPedidos:
       Type: AWS::DynamoDB::Table
       Properties:
@@ -98,6 +122,7 @@ resources:
             Projection:
               ProjectionType: ALL
 
+    # ── EventBridge Bus ───────────────────────────────────────────────────
     PedidosEventBus:
       Type: AWS::Events::EventBus
       Properties:

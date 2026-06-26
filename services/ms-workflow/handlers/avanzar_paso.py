@@ -10,7 +10,7 @@ El handler:
 
 Body esperado:
 {
-    "tenant_id": "taco-bell",
+    "tenant_id": "madam-tusan",
     "pedido_id": "abc123",
     "paso": "COCINA" | "DESPACHO" | "REPARTO",
     "usuario": "chef-juan",
@@ -38,7 +38,7 @@ def handler(event, context):
     try:
         body = json.loads(event.get("body") or "{}")
 
-        tenant_id = body.get("tenant_id", "taco-bell")
+        tenant_id = body.get("tenant_id", "madam-tusan")
         pedido_id = body.get("pedido_id")
         paso = (body.get("paso") or "").upper()
         usuario = body.get("usuario", "operador")
@@ -54,23 +54,18 @@ def handler(event, context):
             return build_response(400, {"error": f"Paso inválido '{paso}'. Válidos: {', '.join(sorted(PASOS_VALIDOS))}"})
 
         # ── Buscar el task_token del paso PENDIENTE en DynamoDB ───────────
-        respuesta = tabla.query(
-            KeyConditionExpression=Key("tenant_id").eq(tenant_id),
-            FilterExpression=Attr("pedido_id").eq(pedido_id)
-            & Attr("paso").eq(paso)
-            & Attr("estado").eq("PENDIENTE"),
+        paso_id = f"{pedido_id}#{paso}"
+        respuesta = tabla.get_item(
+            Key={"tenant_id": tenant_id, "paso_id": paso_id}
         )
 
-        items = respuesta.get("Items", [])
+        paso_pendiente = respuesta.get("Item")
 
-        if not items:
+        if not paso_pendiente or paso_pendiente.get("estado") != "PENDIENTE":
             log_event("WARN", f"No se encontro un paso {paso} pendiente para {pedido_id}")
             return build_response(404, {"error": f"No se encontró un paso '{paso}' PENDIENTE para el pedido '{pedido_id}'"})
 
-        # Tomamos el más reciente si hay varios (ordenados por fecha_inicio desc)
-        paso_pendiente = sorted(items, key=lambda x: x.get("fecha_inicio", ""), reverse=True)[0]
         task_token = paso_pendiente.get("task_token")
-        paso_id = paso_pendiente["paso_id"]
 
         if not task_token:
             log_event("ERROR", "El paso pendiente no tiene task_token")
@@ -93,6 +88,27 @@ def handler(event, context):
                 ":fecha_fin": fecha_fin,
             },
         )
+
+        # ── Actualizar estado del pedido ──────────────────────────────────
+        nuevo_estado = ""
+        if paso == "COCINA":
+            nuevo_estado = "EN_DESPACHO"
+        elif paso == "DESPACHO":
+            nuevo_estado = "EN_REPARTO"
+        elif paso == "REPARTO":
+            nuevo_estado = "ENTREGADO"
+
+        if nuevo_estado:
+            tabla_pedidos = dynamodb.Table(os.environ["TABLA_PEDIDOS"])
+            tabla_pedidos.update_item(
+                Key={"tenant_id": tenant_id, "pedido_id": pedido_id},
+                UpdateExpression="SET tenant_estado = :te, estado_actual = :e, actualizado_en = :t",
+                ExpressionAttributeValues={
+                    ":te": f"{tenant_id}#{nuevo_estado}",
+                    ":e": nuevo_estado,
+                    ":t": fecha_fin,
+                }
+            )
 
         # ── Notificar a Step Functions para reanudar el flujo ─────────────
         output = json.dumps(
