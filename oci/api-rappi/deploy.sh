@@ -33,52 +33,47 @@ fn update context oracle.compartment-id "$COMPARTMENT_ID"
 fn update context api-url "https://functions.$REGION.oraclecloud.com"
 fn update context registry "$REGION.ocir.io/$(oci os ns get --query 'data' --raw-output)/rappi-repo"
 
-# 2. Crear Fn App (Idempotente usando CLI de Fn Project)
+# 2. Crear Fn App (Idempotente usando OCI CLI)
 echo ""
-echo "[2/5] Verificando/Creando Fn App '$APP_NAME' con Fn CLI..."
-# Listar las apps usando fn list apps y buscar si el nombre existe
-APP_EXISTS=$(fn list apps | grep -w "$APP_NAME" || true)
+echo "[2/5] Verificando/Creando Fn App '$APP_NAME'..."
+APP_ID=$(oci fn app list -c "$COMPARTMENT_ID" --display-name "$APP_NAME" --query 'data[0].id' --raw-output 2>/dev/null || echo "")
 
-if [ -z "$APP_EXISTS" ]; then
+if [ -z "$APP_ID" ] || [ "$APP_ID" == "None" ] || [ "$APP_ID" == "null" ]; then
     echo "  -> Creando Fn App '$APP_NAME'..."
     fn create app "$APP_NAME" --annotation oracle.com/oci/subnetIds="[\"$SUBNET_ID\"]"
+    sleep 2
+    APP_ID=$(oci fn app list -c "$COMPARTMENT_ID" --display-name "$APP_NAME" --query 'data[0].id' --raw-output)
 else
-    echo "  -> Fn App '$APP_NAME' ya existe."
+    echo "  -> Fn App '$APP_NAME' ya existe (ID: $APP_ID)."
 fi
-
-# Obtenemos el App ID usando OCI CLI para poder referenciar la función en el API Gateway más adelante
-# OCI CLI se sigue usando acá solo para obtener el OCID necesario para el Gateway
-APP_ID=$(oci fn app list -c "$COMPARTMENT_ID" --name "$APP_NAME" --query 'data[0].id' --raw-output)
 
 # 3. Desplegar Función con Fn CLI
 echo ""
 echo "[3/5] Desplegando la función '$FN_NAME'..."
-# Asegurarse de estar en el directorio correcto si el script se llama desde otra parte
 cd "$(dirname "$0")/function"
 fn deploy --app "$APP_NAME"
 cd ..
 
-# Necesitamos el OCID de la función para el API Gateway Backend
-FUNC_OCID=$(oci fn function list --app-id "$APP_ID" --name "$FN_NAME" --query 'data[0].id' --raw-output)
+FUNC_OCID=$(oci fn function list --app-id "$APP_ID" --display-name "$FN_NAME" --query 'data[0].id' --raw-output)
 echo "  -> Función OCID: $FUNC_OCID"
 
-# 4. Crear API Gateway (Idempotente)
+# 4. Crear API Gateway
 echo ""
 echo "[4/5] Verificando/Creando API Gateway '$GW_NAME'..."
 GW_ID=$(oci api-gateway gateway list -c "$COMPARTMENT_ID" --display-name "$GW_NAME" --lifecycle-state ACTIVE --query 'data.items[0].id' --raw-output 2>/dev/null || echo "")
 if [ -z "$GW_ID" ] || [ "$GW_ID" == "None" ]; then
     echo "  -> Creando API Gateway '$GW_NAME'..."
     GW_ID=$(oci api-gateway gateway create -c "$COMPARTMENT_ID" --endpoint-type PUBLIC --subnet-id "$SUBNET_ID" --display-name "$GW_NAME" --query 'data.id' --raw-output)
-    echo "  -> Esperando a que el API Gateway esté ACTIVE..."
+    echo "  -> Esperando a que el Gateway esté ACTIVE..."
     oci api-gateway gateway get --gateway-id "$GW_ID" --wait-for-state ACTIVE > /dev/null
 else
-    echo "  -> API Gateway '$GW_NAME' ya existe ($GW_ID)."
+    echo "  -> Gateway '$GW_NAME' ya existe ($GW_ID)."
 fi
 
-# 5. Crear/Actualizar API Deployment
+# 5. Crear Deployment
 echo ""
-echo "[5/5] Configurando rutas en el API Deployment..."
-cat <<EOF > deployment-spec.json
+echo "[5/5] Configurando rutas en API Deployment..."
+cat > deployment-spec.json <<EOF
 {
   "routes": [
     {
@@ -115,33 +110,30 @@ cat <<EOF > deployment-spec.json
 EOF
 
 DEPLOYMENT_ID=$(oci api-gateway deployment list -c "$COMPARTMENT_ID" --gateway-id "$GW_ID" --display-name "$DEPLOYMENT_NAME" --lifecycle-state ACTIVE --query 'data.items[0].id' --raw-output 2>/dev/null || echo "")
-
 if [ -z "$DEPLOYMENT_ID" ] || [ "$DEPLOYMENT_ID" == "None" ]; then
-    echo "  -> Creando API Deployment..."
+    echo "  -> Creando Deployment..."
     DEPLOYMENT_ID=$(oci api-gateway deployment create -c "$COMPARTMENT_ID" --gateway-id "$GW_ID" --display-name "$DEPLOYMENT_NAME" --path-prefix "$PATH_PREFIX" --specification file://deployment-spec.json --query 'data.id' --raw-output)
     echo "  -> Esperando a que el Deployment esté ACTIVE..."
     oci api-gateway deployment get --deployment-id "$DEPLOYMENT_ID" --wait-for-state ACTIVE > /dev/null
 else
-    echo "  -> Actualizando API Deployment existente..."
+    echo "  -> Deployment ya existe, actualizando..."
     oci api-gateway deployment update --deployment-id "$DEPLOYMENT_ID" --specification file://deployment-spec.json > /dev/null
-    echo "  -> Esperando a que la actualización termine..."
     oci api-gateway deployment get --deployment-id "$DEPLOYMENT_ID" --wait-for-state ACTIVE > /dev/null
 fi
 
-# Limpieza temporal del spec JSON
 rm deployment-spec.json
 
-# 6. Imprimir Resultados Finales
+# 6. Mostrar URL final
 GW_HOSTNAME=$(oci api-gateway gateway get --gateway-id "$GW_ID" --query 'data.hostname' --raw-output)
 
 echo ""
 echo "=========================================================="
-echo "🚀 ¡DESPLIEGUE FINALIZADO EXITOSAMENTE!"
+echo "✅ DESPLIEGUE COMPLETADO"
 echo "=========================================================="
 echo "URL Base del API Gateway:"
 echo "👉 https://$GW_HOSTNAME$PATH_PREFIX"
 echo ""
-echo "Rutas Disponibles:"
-echo "✅ POST https://$GW_HOSTNAME$PATH_PREFIX/pedidos (Redirección AWS)"
-echo "✅ POST https://$GW_HOSTNAME$PATH_PREFIX/estado  (Invoca Función OCI)"
+echo "Rutas disponibles:"
+echo "✅ POST https://$GW_HOSTNAME$PATH_PREFIX/pedidos"
+echo "✅ POST https://$GW_HOSTNAME$PATH_PREFIX/estado"
 echo "=========================================================="
