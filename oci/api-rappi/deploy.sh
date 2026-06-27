@@ -2,7 +2,7 @@
 set -e
 
 echo "=========================================================="
-echo "Iniciando despliegue de API Rappi en OCI..."
+echo "Desplegando API Rappi en OCI (contexto ya configurado)..."
 echo "=========================================================="
 
 # DATOS FIJOS
@@ -23,18 +23,9 @@ echo "- Compartment: $COMPARTMENT_ID"
 echo "- Subnet: $SUBNET_ID"
 echo "- Región: $REGION"
 
-# 1. Configurar contexto de Fn CLI (SIN --region, solo con provider y api-url)
+# 1. Verificar/Crear App
 echo ""
-echo "[1/5] Configurando contexto de Fn CLI..."
-fn delete context oci-context 2>/dev/null || true
-fn create context oci-context --provider oracle --api-url https://functions.${REGION}.oci.oraclecloud.com
-fn use context oci-context
-fn update context oracle.compartment-id "$COMPARTMENT_ID"
-fn update context registry "${REGION}.ocir.io/$(oci os ns get --query 'data' --raw-output)/rappi-repo"
-
-# 2. Verificar/Crear App
-echo ""
-echo "[2/5] Verificando/Creando Fn App '$APP_NAME'..."
+echo "[1/4] Verificando/Creando Fn App '$APP_NAME'..."
 APP_EXISTS=$(fn list apps | grep -w "$APP_NAME" || true)
 if [ -z "$APP_EXISTS" ]; then
     echo "  -> Creando App..."
@@ -46,9 +37,9 @@ fi
 # Obtener App ID
 APP_ID=$(oci fn app list -c "$COMPARTMENT_ID" --name "$APP_NAME" --query 'data[0].id' --raw-output)
 
-# 3. Desplegar función
+# 2. Desplegar función
 echo ""
-echo "[3/5] Desplegando función '$FN_NAME'..."
+echo "[2/4] Desplegando función '$FN_NAME'..."
 cd "$(dirname "$0")/function"
 fn deploy --app "$APP_NAME"
 cd ..
@@ -56,9 +47,9 @@ cd ..
 FUNC_OCID=$(oci fn function list --app-id "$APP_ID" --name "$FN_NAME" --query 'data[0].id' --raw-output)
 echo "  -> Función OCID: $FUNC_OCID"
 
-# 4. Crear API Gateway
+# 3. Crear API Gateway
 echo ""
-echo "[4/5] Creando API Gateway '$GW_NAME'..."
+echo "[3/4] Creando API Gateway '$GW_NAME'..."
 GW_ID=$(oci api-gateway gateway list -c "$COMPARTMENT_ID" --display-name "$GW_NAME" --lifecycle-state ACTIVE --query 'data.items[0].id' --raw-output 2>/dev/null || echo "")
 if [ -z "$GW_ID" ] || [ "$GW_ID" == "None" ]; then
     echo "  -> Creando Gateway..."
@@ -69,9 +60,9 @@ else
     echo "  -> Gateway ya existe ($GW_ID)."
 fi
 
-# 5. Crear Deployment
+# 4. Crear Deployment
 echo ""
-echo "[5/5] Configurando deployment..."
+echo "[4/4] Configurando deployment..."
 cat <<EOF > deployment-spec.json
 {
   "routes": [
