@@ -84,7 +84,7 @@ resources:
         IdentitySource: method.request.header.Authorization
         RestApiId: !Ref ApiGatewayRestApi
         ProviderARNs:
-          - arn:aws:cognito-idp:us-east-1:777986470706:userpool/us-east-1_5m1Nl5IZ8
+          - ${cf:ms-auth-${sls:stage}.UserPoolArn}
 
     # ── Tabla DynamoDB ────────────────────────────────────────────────────
     TablaPedidos:
