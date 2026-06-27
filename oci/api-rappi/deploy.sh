@@ -23,7 +23,7 @@ echo "- Compartment: $COMPARTMENT_ID"
 echo "- Subnet: $SUBNET_ID"
 echo "- Región: $REGION"
 
-# 1. Configurar contexto de Fn CLI (sin --region)
+# 1. Configurar contexto de Fn CLI (SIN --region, solo con provider y api-url)
 echo ""
 echo "[1/5] Configurando contexto de Fn CLI..."
 fn delete context oci-context 2>/dev/null || true
@@ -32,7 +32,7 @@ fn use context oci-context
 fn update context oracle.compartment-id "$COMPARTMENT_ID"
 fn update context registry "${REGION}.ocir.io/$(oci os ns get --query 'data' --raw-output)/rappi-repo"
 
-# 2. Crear/Verificar App
+# 2. Verificar/Crear App
 echo ""
 echo "[2/5] Verificando/Creando Fn App '$APP_NAME'..."
 APP_EXISTS=$(fn list apps | grep -w "$APP_NAME" || true)
@@ -131,4 +131,4 @@ echo "=========================================================="
 echo "👉 URL Base: https://$GW_HOSTNAME$PATH_PREFIX"
 echo "✅ POST https://$GW_HOSTNAME$PATH_PREFIX/pedidos"
 echo "✅ POST https://$GW_HOSTNAME$PATH_PREFIX/estado"
-echo "==========================================================" 
+echo "=========================================================="
