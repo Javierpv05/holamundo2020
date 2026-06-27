@@ -36,9 +36,6 @@ functions:
           path: pedidos
           method: post
           cors: true
-          authorizer:
-            type: COGNITO_USER_POOLS
-            authorizerId: !Ref ApiGatewayAuthorizer
 
   consultarEstado:
     handler: handlers/consultar_estado.handler
